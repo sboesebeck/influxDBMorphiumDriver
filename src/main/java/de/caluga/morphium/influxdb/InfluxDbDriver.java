@@ -35,12 +35,12 @@ import java.util.concurrent.TimeUnit;
  * Created by stephan on 22.06.16.
  */
 public class InfluxDbDriver implements MorphiumDriver {
-    private int maxConPerHost=1;
-    private int minConPerHost=1;
-    private int socketTimeout=0;
-    private int conTimeout=5000;
-    private int heartbeatFrequency=1000;
-    private Logger log=new Logger(InfluxDbDriver.class);
+    private int maxConPerHost = 1;
+    private int minConPerHost = 1;
+    private int socketTimeout = 0;
+    private int conTimeout = 5000;
+    private int heartbeatFrequency = 1000;
+    private Logger log = new Logger(InfluxDbDriver.class);
     private PoolingHttpClientConnectionManager conMgr;
 
     private String[] hosts;
@@ -163,7 +163,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void setHostSeed(String... host) {
-        hosts=host;
+        hosts = host;
     }
 
     public void setMaxConnectionsPerHost(int mx) {
@@ -211,7 +211,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void connect() throws MorphiumDriverException {
-        conMgr=new PoolingHttpClientConnectionManager(getMaxConnectionLifetime(),TimeUnit.MILLISECONDS);
+        conMgr = new PoolingHttpClientConnectionManager(getMaxConnectionLifetime(), TimeUnit.MILLISECONDS);
         conMgr.setDefaultMaxPerRoute(100);
         conMgr.setMaxTotal(100000);
     }
@@ -309,7 +309,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void insert(String db, String collection, List<Map<String, Object>> objs, WriteConcern wc) throws MorphiumDriverException {
-        store(db,collection,objs,wc);
+        store(db, collection, objs, wc);
     }
 
     public void store(String db, String collection, List<Map<String, Object>> list, WriteConcern writeConcern) throws MorphiumDriverException {
@@ -342,22 +342,14 @@ public class InfluxDbDriver implements MorphiumDriver {
                     valueKeys.add(entry.getKey());
                     continue;
                 }
-                try {
-                    b.append(entry.getKey()).append("=").append(URLEncoder.encode(entry.getValue().toString(),"UTF8"));
-                } catch (UnsupportedEncodingException e) {
-                    e.printStackTrace();
-                }
+                b.append(entry.getKey()).append("=").append(entry.getValue());
                 b.append(",");
             }
 
             b.setLength(b.length() - 1);
             b.append(" ");
             for (String v : valueKeys) {
-                try {
-                    b.append(v).append("=").append(URLEncoder.encode(measurement.get(v).toString(),"UTF8"));
-                } catch (UnsupportedEncodingException e) {
-                    e.printStackTrace();
-                }
+                b.append(v).append("=").append(measurement.get(v));
                 b.append(",");
             }
             b.setLength(b.length() - 1);
@@ -369,17 +361,17 @@ public class InfluxDbDriver implements MorphiumDriver {
                 setConnectionManager(conMgr).build();
 
         //need to write to all hosts in cluster
-        for (String h: getHostSeed()) {
-            HttpPost p = new HttpPost("http://"+h+"/write?db=" + db);
+        for (String h : getHostSeed()) {
+            HttpPost p = new HttpPost("http://" + h + "/write?db=" + db);
 
             StringEntity e = new StringEntity(b.toString(), "UTF8");
-            log.info("Sending to db " + db + " on host "+h+": " + b.toString());
+            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
             p.setEntity(e);
             try {
                 cl.execute(p).close();
 
             } catch (IOException e1) {
-                throw new MorphiumDriverException("ioexception",e1);
+                throw new MorphiumDriverException("ioexception", e1);
             }
         }
     }
@@ -464,7 +456,6 @@ public class InfluxDbDriver implements MorphiumDriver {
     public void createIndex(String db, String collection, Map<String, Object> index, Map<String, Object> options) throws MorphiumDriverException {
 
     }
-
 
 
 }
