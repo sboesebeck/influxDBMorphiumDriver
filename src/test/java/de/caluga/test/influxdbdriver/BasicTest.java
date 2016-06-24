@@ -5,6 +5,7 @@ import de.caluga.morphium.MorphiumConfig;
 import de.caluga.morphium.annotations.Entity;
 import de.caluga.morphium.annotations.Id;
 import de.caluga.morphium.influxdb.InfluxDbDriver;
+import de.caluga.morphium.query.Query;
 import org.junit.Test;
 
 /**
@@ -29,9 +30,9 @@ public class BasicTest {
         cfg.setGlobalLogSynced(true);
         Morphium m = new Morphium(cfg);
 
-        for (int i = 0; i < 10000; i++) {
+        for (int i = 0; i < 100; i++) {
             EntTest e = new EntTest();
-            e.id = (long) (System.currentTimeMillis() * 1000 * 1000 - Math.random() * 1000 * 1000 * 1000 * 600);
+            e.id = (long) (System.currentTimeMillis() * 1000 * 1000 - Math.random() * 1000 * 1000 * 1000 * 2600);
 
 
             e.host = hosts[(int) (Math.random() * hosts.length)];
@@ -44,7 +45,7 @@ public class BasicTest {
                 e.isSearch = false;
                 e.search = search[(int) (Math.random() * search.length)];
             }
-            e.retCode = ret[(int) (Math.random() * ret.length)];
+            e.retCode = ""+ret[(int) (Math.random() * ret.length)];
             e.sizekb = 100 * (1.0 + Math.random());
             e.url = urls[(int) (Math.random() * urls.length)];
             e.sessionid=session[(int) (session.length*Math.random())];
@@ -53,6 +54,11 @@ public class BasicTest {
             }
             m.store(e);
         }
+
+        Query<EntTest> q=m.createQueryFor(EntTest.class).f("host").eq(hosts[0]).f("lfd").gt(12);
+        q.addProjection("reqtime","mean");
+        q.addProjection("ret_code","group by");
+        q.asList();
     }
 
     @Entity(collectionName = "requests")
@@ -65,10 +71,12 @@ public class BasicTest {
         public double reqtime = 123.345;
         public boolean success = true;
         public String url = "";
-        public int retCode = 404;
+        public String retCode = "404";
         public double sizekb = 0;
         public String search = "";
         public boolean isSearch = false;
         public double checkoutAmount =0;
+
+
     }
 }

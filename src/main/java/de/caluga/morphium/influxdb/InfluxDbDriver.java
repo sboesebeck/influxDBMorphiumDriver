@@ -3,32 +3,36 @@ package de.caluga.morphium.influxdb;
 import de.caluga.morphium.Logger;
 import de.caluga.morphium.Morphium;
 import de.caluga.morphium.driver.*;
-import de.caluga.morphium.driver.bson.MorphiumId;
 import de.caluga.morphium.driver.bulk.BulkRequestContext;
 import de.caluga.morphium.driver.mongodb.Maximums;
-import org.apache.http.*;
-import org.apache.http.client.HttpClient;
+import org.apache.http.HeaderElement;
+import org.apache.http.HeaderElementIterator;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.client.utils.URLEncodedUtils;
-import org.apache.http.config.ConnectionConfig;
-import org.apache.http.config.SocketConfig;
 import org.apache.http.conn.ConnectionKeepAliveStrategy;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
-import org.apache.http.impl.conn.DefaultManagedHttpClientConnection;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.message.BasicHeaderElementIterator;
 import org.apache.http.protocol.HTTP;
 import org.apache.http.protocol.HttpContext;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -301,7 +305,166 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public List<Map<String, Object>> find(String db, String collection, Map<String, Object> query, Map<String, Integer> sort, Map<String, Object> projection, int skip, int limit, int batchSize, ReadPreference rp, Map<String, Object> findMetaData) throws MorphiumDriverException {
-        return null;
+        StringBuilder b = new StringBuilder();
+        b.append("select ");
+        StringBuilder groupBy = new StringBuilder();
+        for (Map.Entry<String, Object> m : projection.entrySet()) {
+            if (!m.getValue().equals(0)) {
+                if (m.getKey().equals("_id")) {
+                    continue;
+                }
+                if (m.getValue().equals(1)) {
+                    b.append(m.getKey());
+                } else {
+                    if (m.getValue().toString().equalsIgnoreCase("group by")) {
+                        groupBy.append(m.getKey());
+                        continue;
+                    }
+                    b.append(m.getValue()).append("(");
+                    b.append(m.getKey()).append(")");
+                }
+                b.append(",");
+            }
+
+        }
+        b.setLength(b.length() - 1);
+        if (b.toString().equals("select ")) {
+            b.append("*");
+        }
+        b.append(" from ").append(collection);
+        //where clause
+        if (!query.isEmpty()) {
+            b.append(" where ");
+            addQueryString(b, query);
+        }
+        if (groupBy.length() != 0) {
+            b.append(" group by ");
+            b.append(groupBy);
+        }
+
+        log.info("Query " + b.toString());
+        CloseableHttpClient cl = HttpClients.custom().setKeepAliveStrategy(keepAliveStrategy).
+                setConnectionManager(conMgr).build();
+
+        //need to write to all hosts in cluster
+
+        String h = getHostSeed()[(int) (Math.random() * getHostSeed().length)];
+        HttpGet p = null;
+        try {
+            p = new HttpGet("http://" + h + "/query?db=" + db + "&q=" + URLEncoder.encode(b.toString(), "UTF8"));
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
+
+        //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
+        List<Map<String,Object>> res=new ArrayList<Map<String, Object>>();
+        try {
+            CloseableHttpResponse resp = cl.execute(p);
+            BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
+            JSONParser parser = new JSONParser();
+            Map<String, Object> result = (Map<String, Object>) parser.parse(in);
+            log.info("Got Result!");
+            JSONArray series=  (JSONArray) ((JSONObject)((JSONArray)result.get("results")).get(0)).get("series");
+
+            for (Object o:series){
+                JSONObject obj=(JSONObject)o;
+                Map<String,Object> resObj=new HashMap<String, Object>();
+                JSONArray cols= (JSONArray) obj.get("columns");
+                JSONArray values=(JSONArray)obj.get("values");
+                JSONArray tags=(JSONArray)obj.get("tags");
+
+                for (int i=0;i<cols.size();i++){
+                    if (cols.get(i).equals("time")){
+                        resObj.put("_id",values.get(i));
+                    }
+                    //TODO: deal with mean() result
+                    resObj.put(cols.get(i).toString(),values.get(i));
+                }
+                for (Object t:tags){
+                    JSONObject to=(JSONObject)t;
+                    resObj.putAll(to);
+                }
+                res.add(resObj);
+            }
+
+        } catch (IOException e1) {
+            throw new MorphiumDriverException("ioexception", e1);
+        } catch (ParseException e1) {
+            e1.printStackTrace();
+        }
+
+        return res;
+    }
+
+
+    private void addQueryString(StringBuilder b, Map<String, Object> query) {
+        for (Map.Entry<String, Object> e : query.entrySet()) {
+            if (e.getKey().equals("_id")) {
+                //this is the timestamp...
+                continue;
+            }
+            if (e.getKey().equals("$and") || e.getKey().equals("$or")) {
+                //And concatenation
+                List<Map<String, Object>> subQueries = (List<Map<String, Object>>) e.getValue();
+                for (Map<String, Object> q : subQueries) {
+                    addQueryString(b, q);
+                    if (e.getKey().equals("$and")) {
+                        b.append(" AND ");
+                    } else {
+                        b.append(" OR ");
+                    }
+                }
+                trimLastBooleanOp(b);
+                continue;
+            }
+            b.append(e.getKey());
+
+            if (e.getValue() instanceof Map) {
+                Map<String, Object> qe = (Map<String, Object>) e.getValue();
+                for (Map.Entry<String, Object> en : qe.entrySet()) {
+                    if (en.getKey().equals("$eq")) {
+                        b.append("=");
+                    } else if (en.getKey().equals("$match")) {
+                        log.error("Pattern matching");
+                    } else if (e.getKey().equals("$ne")) {
+                        b.append("!=");
+                    } else if (en.getKey().equals("$gt")) {
+                        b.append(">");
+                    } else if (en.getKey().equals("$gte")) {
+                        b.append(">=");
+                    } else if (en.getKey().equals("$lte")) {
+                        b.append("<=");
+                    } else if (en.getKey().equals("$lt")) {
+                        b.append("<");
+                    } else {
+                        throw new RuntimeException("Unsupported operand " + e.getValue() + " for field " + e.getKey());
+                    }
+                    if (en.getValue() instanceof String) {
+                        b.append("'").append(en.getValue()).append("'");
+                    } else {
+                        b.append(en.getValue());
+                    }
+                }
+            } else {
+
+                b.append("=");
+                if (e.getValue() instanceof String) {
+                    b.append("'").append(e.getValue()).append("'");
+                } else {
+                    b.append(e.getValue());
+                }
+                b.append(" AND ");
+            }
+        }
+        trimLastBooleanOp(b);
+    }
+
+    private void trimLastBooleanOp(StringBuilder b) {
+        if (b.toString().endsWith(" AND ")) {
+            b.setLength(b.length() - 5);
+        } else if (b.toString().endsWith(" OR ")) {
+            b.setLength(b.length() - 4);
+        }
     }
 
     public long count(String db, String collection, Map<String, Object> query, ReadPreference rp) throws MorphiumDriverException {
@@ -325,7 +488,7 @@ public class InfluxDbDriver implements MorphiumDriver {
 
 
             if (measurement.get("_id") != null) {
-//                log.warn("Cannot up´date values in influxdb! Will create a new entry!");
+                //                log.warn("Cannot up´date values in influxdb! Will create a new entry!");
                 try {
                     tm = Long.valueOf(measurement.get("_id").toString());
                 } catch (NumberFormatException e) {
@@ -337,7 +500,9 @@ public class InfluxDbDriver implements MorphiumDriver {
             List<String> valueKeys = new ArrayList<String>();
             for (Map.Entry<String, Object> entry : measurement.entrySet()) {
 
-                if (entry.getKey().equals("_id")) continue;
+                if (entry.getKey().equals("_id")) {
+                    continue;
+                }
                 if (entry.getValue() instanceof Number || entry.getValue() instanceof Double || entry.getValue() instanceof Float || entry.getValue() instanceof Integer || entry.getValue() instanceof Long || entry.getValue() instanceof Boolean) {
                     valueKeys.add(entry.getKey());
                     continue;
@@ -365,7 +530,7 @@ public class InfluxDbDriver implements MorphiumDriver {
             HttpPost p = new HttpPost("http://" + h + "/write?db=" + db);
 
             StringEntity e = new StringEntity(b.toString(), "UTF8");
-            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
+            //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
             p.setEntity(e);
             try {
                 cl.execute(p).close();
