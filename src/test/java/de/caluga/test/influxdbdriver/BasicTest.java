@@ -66,6 +66,26 @@ public class BasicTest {
         for (EntTest et:lst){
             System.out.println("ReqTime (mean): "+et.reqtime+" - ret_code: "+et.retCode +" - lfd: "+et.lfd+" host: "+et.host);
         }
+
+        q=m.createQueryFor(EntTest.class).f("host").eq(hosts[1]).f("lfd").gt(12).f("time()").gt("now() - 100d");
+        q.addProjection("reqtime","mean");
+        q.addProjection("ret_code","group by");
+        lst=q.asList();
+        System.out.println("Got results:"+lst.size());
+
+        for (EntTest et:lst){
+            System.out.println("ReqTime (mean): "+et.reqtime+" - ret_code: "+et.retCode +" - lfd: "+et.lfd+" host: "+et.host);
+        }
+
+
+        try {
+            q=m.createQueryFor(EntTest.class).f("host").eq(hosts[1]).f("lfd").gt(12).f("time()").gt("now(-00d");
+            lst=q.asList(); //error
+        } catch (Exception e) {
+            System.out.println("Got expected exception!");
+            e.printStackTrace();
+        }
+
     }
 
     @Entity(collectionName = "requests")

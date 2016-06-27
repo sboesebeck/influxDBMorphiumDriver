@@ -37,7 +37,15 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Created by stephan on 22.06.16.
+ * basic influx db support for morphium
+ *
+ * translation of the morphium fluent interface for queries to influxQL has some caveats:
+ *
+ * <ul>
+ *     <li>not possible to issue several select commands in one query</li>
+ *     <li>if you want to use aggregation, add the aggregate function to the projection like <code>query.addProjection("reqtime","mean");</code></li>
+ *     <li>complex queries rely on setting the query to the key <code>qstr</code> (for query string). Make sure this is valid!</li>
+ * </ul>
  */
 public class InfluxDbDriver implements MorphiumDriver {
     private int maxConPerHost = 1;
@@ -290,7 +298,30 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public Map<String, Object> runCommand(String db, Map<String, Object> cmd) throws MorphiumDriverException {
-        return null;
+        CloseableHttpClient cl = HttpClients.custom().setKeepAliveStrategy(keepAliveStrategy).
+                setConnectionManager(conMgr).build();
+
+        String h = getHostSeed()[(int) (Math.random() * getHostSeed().length)];
+        HttpGet p = null;
+        try {
+            p = new HttpGet("http://" + h + "/query?db=" + db + "&q=" + URLEncoder.encode(cmd.get("qstr").toString(), "UTF8"));
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
+        Map<String, Object> result=null;
+        try {
+            CloseableHttpResponse resp = null;
+            resp = cl.execute(p);
+            BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
+            JSONParser parser = new JSONParser();
+                result = (Map<String, Object>) parser.parse(in);
+
+        } catch(ParseException pe){
+            throw new MorphiumDriverException("parsing failed",pe);
+        } catch (IOException e) {
+            throw new MorphiumDriverException("io exception",e);
+        }
+        return result;
     }
 
     public MorphiumCursor initIteration(String db, String collection, Map<String, Object> query, Map<String, Integer> sort, Map<String, Object> projection, int skip, int limit, int batchSize, ReadPreference readPreference, Map<String, Object> findMetaData) throws MorphiumDriverException {
@@ -366,6 +397,8 @@ public class InfluxDbDriver implements MorphiumDriver {
             JSONParser parser = new JSONParser();
             Map<String, Object> result = (Map<String, Object>) parser.parse(in);
             log.info("Got Result!");
+            if (result.get("error")!=null)throw new MorphiumDriverException(result.get("error").toString());
+            if (result.get("results")==null) return res;
             JSONArray series = (JSONArray) ((JSONObject) ((JSONArray) result.get("results")).get(0)).get("series");
 
             for (Object o : series) {
@@ -381,9 +414,13 @@ public class InfluxDbDriver implements MorphiumDriver {
                     for (int i = 0; i < cols.size(); i++) {
                         if (cols.get(i).equals("time")) {
                             try {
-                                resObj.put("_id", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:SS'Z'").parse(arr.get(i).toString()).getTime());
+                                resObj.put("_id", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").parse(arr.get(i).toString()).getTime());
                             } catch (java.text.ParseException e) {
-                                e.printStackTrace();
+                                try {
+                                    resObj.put("_id", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'").parse(arr.get(i).toString()).getTime());
+                                } catch (java.text.ParseException e1) {
+                                    e1.printStackTrace();
+                                }
                             }
                         } else {
 
@@ -411,6 +448,7 @@ public class InfluxDbDriver implements MorphiumDriver {
                 //this is the timestamp...
                 continue;
             }
+            boolean time=false;
             if (e.getKey().equals("$and") || e.getKey().equals("$or")) {
                 //And concatenation
                 List<Map<String, Object>> subQueries = (List<Map<String, Object>>) e.getValue();
@@ -424,9 +462,11 @@ public class InfluxDbDriver implements MorphiumDriver {
                 }
                 trimLastBooleanOp(b);
                 continue;
+            } else if (e.getKey().equals("time()")){
+                b.append("time"); time=true;
+            } else {
+                b.append(e.getKey());
             }
-            b.append(e.getKey());
-
             if (e.getValue() instanceof Map) {
                 Map<String, Object> qe = (Map<String, Object>) e.getValue();
                 for (Map.Entry<String, Object> en : qe.entrySet()) {
@@ -447,7 +487,7 @@ public class InfluxDbDriver implements MorphiumDriver {
                     } else {
                         throw new RuntimeException("Unsupported operand " + e.getValue() + " for field " + e.getKey());
                     }
-                    if (en.getValue() instanceof String) {
+                    if (en.getValue() instanceof String && !time) {
                         b.append("'").append(en.getValue()).append("'");
                     } else {
                         b.append(en.getValue());
@@ -456,7 +496,7 @@ public class InfluxDbDriver implements MorphiumDriver {
             } else {
 
                 b.append("=");
-                if (e.getValue() instanceof String) {
+                if (e.getValue() instanceof String && !time) {
                     b.append("'").append(e.getValue()).append("'");
                 } else {
                     b.append(e.getValue());
