@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -322,6 +323,7 @@ public class InfluxDbDriver implements MorphiumDriver {
                     }
                     b.append(m.getValue()).append("(");
                     b.append(m.getKey()).append(")");
+                    b.append(" as " + m.getKey());
                 }
                 b.append(",");
             }
@@ -357,34 +359,40 @@ public class InfluxDbDriver implements MorphiumDriver {
         }
 
         //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
-        List<Map<String,Object>> res=new ArrayList<Map<String, Object>>();
+        List<Map<String, Object>> res = new ArrayList<Map<String, Object>>();
         try {
             CloseableHttpResponse resp = cl.execute(p);
             BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
             JSONParser parser = new JSONParser();
             Map<String, Object> result = (Map<String, Object>) parser.parse(in);
             log.info("Got Result!");
-            JSONArray series=  (JSONArray) ((JSONObject)((JSONArray)result.get("results")).get(0)).get("series");
+            JSONArray series = (JSONArray) ((JSONObject) ((JSONArray) result.get("results")).get(0)).get("series");
 
-            for (Object o:series){
-                JSONObject obj=(JSONObject)o;
-                Map<String,Object> resObj=new HashMap<String, Object>();
-                JSONArray cols= (JSONArray) obj.get("columns");
-                JSONArray values=(JSONArray)obj.get("values");
-                JSONArray tags=(JSONArray)obj.get("tags");
+            for (Object o : series) {
+                JSONObject obj = (JSONObject) o;
+                Map<String, Object> resObj = new HashMap<String, Object>();
+                JSONArray cols = (JSONArray) obj.get("columns");
+                JSONArray values = ((JSONArray) obj.get("values"));
+                JSONObject tags = (JSONObject) obj.get("tags");
 
-                for (int i=0;i<cols.size();i++){
-                    if (cols.get(i).equals("time")){
-                        resObj.put("_id",values.get(i));
+                for (Object val : values) {
+                    JSONArray arr = (JSONArray) val;
+
+                    for (int i = 0; i < cols.size(); i++) {
+                        if (cols.get(i).equals("time")) {
+                            try {
+                                resObj.put("_id", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:SS'Z'").parse(arr.get(i).toString()).getTime());
+                            } catch (java.text.ParseException e) {
+                                e.printStackTrace();
+                            }
+                        } else {
+
+                            resObj.put(cols.get(i).toString(), arr.get(i));
+                        }
                     }
-                    //TODO: deal with mean() result
-                    resObj.put(cols.get(i).toString(),values.get(i));
+                    resObj.putAll(tags);
+                    res.add(resObj);
                 }
-                for (Object t:tags){
-                    JSONObject to=(JSONObject)t;
-                    resObj.putAll(to);
-                }
-                res.add(resObj);
             }
 
         } catch (IOException e1) {

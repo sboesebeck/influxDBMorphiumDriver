@@ -8,6 +8,8 @@ import de.caluga.morphium.influxdb.InfluxDbDriver;
 import de.caluga.morphium.query.Query;
 import org.junit.Test;
 
+import java.util.List;
+
 /**
  * Created by stephan on 22.06.16.
  */
@@ -36,7 +38,7 @@ public class BasicTest {
 
 
             e.host = hosts[(int) (Math.random() * hosts.length)];
-            e.reqtime = 500 * Math.random() + 100 + i;
+            e.reqtime = 500 * Math.random() + 100 + i*10;
             e.lfd = i;
             e.success = Math.random() > 0.5;
             if (Math.random() > 0.5) {
@@ -58,7 +60,12 @@ public class BasicTest {
         Query<EntTest> q=m.createQueryFor(EntTest.class).f("host").eq(hosts[0]).f("lfd").gt(12);
         q.addProjection("reqtime","mean");
         q.addProjection("ret_code","group by");
-        q.asList();
+        List<EntTest> lst=q.asList();
+        System.out.println("Got results:"+lst.size());
+
+        for (EntTest et:lst){
+            System.out.println("ReqTime (mean): "+et.reqtime+" - ret_code: "+et.retCode +" - lfd: "+et.lfd+" host: "+et.host);
+        }
     }
 
     @Entity(collectionName = "requests")
