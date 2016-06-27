@@ -77,6 +77,7 @@ public class BasicTest {
             System.out.println("ReqTime (mean): "+et.reqtime+" - ret_code: "+et.retCode +" - lfd: "+et.lfd+" host: "+et.host);
         }
 
+        boolean gotError=false;
 
         try {
             q=m.createQueryFor(EntTest.class).f("host").eq(hosts[1]).f("lfd").gt(12).f("time()").gt("now(-00d");
@@ -84,8 +85,9 @@ public class BasicTest {
         } catch (Exception e) {
             System.out.println("Got expected exception!");
             e.printStackTrace();
+            gotError=true;
         }
-
+        assert(gotError);
     }
 
     @Entity(collectionName = "requests")
