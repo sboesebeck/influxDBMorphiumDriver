@@ -185,7 +185,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void setMaxConnectionsPerHost(int mx) {
-
+        maxConPerHost=mx;
     }
 
     public void setMinConnectionsPerHost(int mx) {
@@ -193,19 +193,19 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void setMaxConnectionLifetime(int timeout) {
-
+        conTimeout=timeout;
     }
 
     public void setMaxConnectionIdleTime(int time) {
-
+        conTimeout=time;
     }
 
     public void setSocketTimeout(int timeout) {
-
+        socketTimeout=timeout;
     }
 
     public void setConnectionTimeout(int timeout) {
-
+        conTimeout=timeout;
     }
 
     public void setDefaultW(int w) {
@@ -243,11 +243,15 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public Maximums getMaximums() {
-        return null;
+        Maximums ret=new Maximums();
+        ret.setMaxBsonSize(Integer.MAX_VALUE);
+        ret.setMaxMessageSize(Integer.MAX_VALUE);
+        ret.setMaxWriteBatchSize(100);
+        return ret;
     }
 
     public boolean isConnected() {
-        return false;
+        return conMgr!=null;
     }
 
     public void setDefaultJ(boolean j) {
