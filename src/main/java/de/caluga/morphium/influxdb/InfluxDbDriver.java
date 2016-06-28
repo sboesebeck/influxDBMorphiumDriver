@@ -96,36 +96,72 @@ public class InfluxDbDriver implements MorphiumDriver {
         return false;
     }
 
+    public void setDefaultFsync(boolean j) {
+
+    }
+
     public String[] getHostSeed() {
         return hosts;
+    }
+
+    public void setHostSeed(String... host) {
+        hosts = host;
     }
 
     public int getMaxConnectionsPerHost() {
         return maxConPerHost;
     }
 
+    public void setMaxConnectionsPerHost(int mx) {
+        maxConPerHost = mx;
+    }
+
     public int getMinConnectionsPerHost() {
         return minConPerHost;
+    }
+
+    public void setMinConnectionsPerHost(int mx) {
+
     }
 
     public int getMaxConnectionLifetime() {
         return conTimeout;
     }
 
+    public void setMaxConnectionLifetime(int timeout) {
+        conTimeout = timeout;
+    }
+
     public int getMaxConnectionIdleTime() {
         return conTimeout;
+    }
+
+    public void setMaxConnectionIdleTime(int time) {
+        conTimeout = time;
     }
 
     public int getSocketTimeout() {
         return socketTimeout;
     }
 
+    public void setSocketTimeout(int timeout) {
+        socketTimeout = timeout;
+    }
+
     public int getConnectionTimeout() {
         return conTimeout;
     }
 
+    public void setConnectionTimeout(int timeout) {
+        conTimeout = timeout;
+    }
+
     public int getDefaultW() {
         return 0;
+    }
+
+    public void setDefaultW(int w) {
+
     }
 
     public int getMaxBlockintThreadMultiplier() {
@@ -136,19 +172,7 @@ public class InfluxDbDriver implements MorphiumDriver {
         return heartbeatFrequency;
     }
 
-    public void setHeartbeatSocketTimeout(int heartbeatSocketTimeout) {
-
-    }
-
-    public void setUseSSL(boolean useSSL) {
-
-    }
-
     public void setHeartbeatFrequency(int heartbeatFrequency) {
-
-    }
-
-    public void setWriteTimeout(int writeTimeout) {
 
     }
 
@@ -164,51 +188,39 @@ public class InfluxDbDriver implements MorphiumDriver {
         return 0;
     }
 
+    public void setHeartbeatSocketTimeout(int heartbeatSocketTimeout) {
+
+    }
+
     public boolean isUseSSL() {
         return false;
+    }
+
+    public void setUseSSL(boolean useSSL) {
+
     }
 
     public boolean isDefaultJ() {
         return false;
     }
 
+    public void setDefaultJ(boolean j) {
+
+    }
+
     public int getWriteTimeout() {
         return 0;
+    }
+
+    public void setWriteTimeout(int writeTimeout) {
+
     }
 
     public int getLocalThreshold() {
         return 0;
     }
 
-    public void setHostSeed(String... host) {
-        hosts = host;
-    }
-
-    public void setMaxConnectionsPerHost(int mx) {
-        maxConPerHost=mx;
-    }
-
-    public void setMinConnectionsPerHost(int mx) {
-
-    }
-
-    public void setMaxConnectionLifetime(int timeout) {
-        conTimeout=timeout;
-    }
-
-    public void setMaxConnectionIdleTime(int time) {
-        conTimeout=time;
-    }
-
-    public void setSocketTimeout(int timeout) {
-        socketTimeout=timeout;
-    }
-
-    public void setConnectionTimeout(int timeout) {
-        conTimeout=timeout;
-    }
-
-    public void setDefaultW(int w) {
+    public void setLocalThreshold(int thr) {
 
     }
 
@@ -254,44 +266,33 @@ public class InfluxDbDriver implements MorphiumDriver {
         return conMgr!=null;
     }
 
-    public void setDefaultJ(boolean j) {
-
+    public int getDefaultWriteTimeout() {
+        return 0;
     }
 
     public void setDefaultWriteTimeout(int wt) {
 
     }
 
-    public int getDefaultWriteTimeout() {
-        return 0;
-    }
-
-    public void setLocalThreshold(int thr) {
-
-    }
-
-    public void setDefaultFsync(boolean j) {
-
+    public int getRetriesOnNetworkError() {
+        return 1;
     }
 
     public void setRetriesOnNetworkError(int r) {
         this.retriesOnNetworError=r;
     }
 
-    public int getRetriesOnNetworkError() {
-        return 1;
+    public int getSleepBetweenErrorRetries() {
+        return 0;
     }
 
     public void setSleepBetweenErrorRetries(int s) {
 
     }
 
-    public int getSleepBetweenErrorRetries() {
-        return 0;
-    }
-
     public void close() throws MorphiumDriverException {
-
+        conMgr.close();
+        conMgr = null;
     }
 
     public Map<String, Object> getReplsetStatus() throws MorphiumDriverException {
