@@ -58,6 +58,9 @@ public class InfluxDbDriver implements MorphiumDriver {
 
     private String[] hosts;
 
+    private String login;
+    private String password;
+
     private ConnectionKeepAliveStrategy keepAliveStrategy = new ConnectionKeepAliveStrategy() {
         public long getKeepAliveDuration(HttpResponse response, HttpContext context) {
             HeaderElementIterator it = new BasicHeaderElementIterator
@@ -74,17 +77,19 @@ public class InfluxDbDriver implements MorphiumDriver {
             return 5 * 1000;
         }
     };
+    private int retriesOnNetworError=1;
 
     public void setCredentials(String db, String login, char[] pwd) {
-
+        this.login=login;
+        this.password=new String(pwd);
     }
 
     public boolean isReplicaset() {
-        return false;
+        return hosts!=null&&hosts.length>0;
     }
 
     public String[] getCredentials(String db) {
-        return new String[0];
+        return new String[]{login,password};
     }
 
     public boolean isDefaultFsync() {
@@ -100,23 +105,23 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public int getMinConnectionsPerHost() {
-        return 0;
+        return minConPerHost;
     }
 
     public int getMaxConnectionLifetime() {
-        return 0;
+        return conTimeout;
     }
 
     public int getMaxConnectionIdleTime() {
-        return 0;
+        return conTimeout;
     }
 
     public int getSocketTimeout() {
-        return 0;
+        return socketTimeout;
     }
 
     public int getConnectionTimeout() {
-        return 0;
+        return conTimeout;
     }
 
     public int getDefaultW() {
@@ -124,11 +129,11 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public int getMaxBlockintThreadMultiplier() {
-        return 0;
+        return 1;
     }
 
     public int getHeartbeatFrequency() {
-        return 0;
+        return heartbeatFrequency;
     }
 
     public void setHeartbeatSocketTimeout(int heartbeatSocketTimeout) {
@@ -266,11 +271,11 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void setRetriesOnNetworkError(int r) {
-
+        this.retriesOnNetworError=r;
     }
 
     public int getRetriesOnNetworkError() {
-        return 0;
+        return 1;
     }
 
     public void setSleepBetweenErrorRetries(int s) {
@@ -298,13 +303,37 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public Map<String, Object> runCommand(String db, Map<String, Object> cmd) throws MorphiumDriverException {
+        try {
+            CloseableHttpResponse resp = doRequest(db, "query",cmd.get("qstr").toString());
+            BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
+            JSONParser parser = new JSONParser();
+            Map<String,Object> result = (Map<String, Object>) parser.parse(in);
+            resp.close();
+            return result;
+        } catch (IOException e) {
+            throw new MorphiumDriverException("IO Error",e);
+        } catch (ParseException e) {
+            throw new MorphiumDriverException("Parse error",e);
+        }
+    }
+
+    private CloseableHttpResponse doRequest(String db,String op,String str) throws MorphiumDriverException {
         CloseableHttpClient cl = HttpClients.custom().setKeepAliveStrategy(keepAliveStrategy).
                 setConnectionManager(conMgr).build();
 
         String h = getHostSeed()[(int) (Math.random() * getHostSeed().length)];
         HttpGet p = null;
+        StringBuilder auth=new StringBuilder();
+        if (login!=null){
+            try {
+                auth.append("&u=").append(URLEncoder.encode(login,"UTF8"));
+                auth.append("&p=").append(URLEncoder.encode(password,"UTF8"));
+            } catch (UnsupportedEncodingException e) {
+                log.error("Authentication failed!",e);
+            }
+        }
         try {
-            p = new HttpGet("http://" + h + "/query?db=" + db + "&q=" + URLEncoder.encode(cmd.get("qstr").toString(), "UTF8"));
+            p = new HttpGet("http://" + h + "/"+op+"?db=" + db +auth.toString()+ "&q=" + URLEncoder.encode(str, "UTF8"));
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }
@@ -312,16 +341,10 @@ public class InfluxDbDriver implements MorphiumDriver {
         try {
             CloseableHttpResponse resp = null;
             resp = cl.execute(p);
-            BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
-            JSONParser parser = new JSONParser();
-                result = (Map<String, Object>) parser.parse(in);
-
-        } catch(ParseException pe){
-            throw new MorphiumDriverException("parsing failed",pe);
+            return resp;
         } catch (IOException e) {
             throw new MorphiumDriverException("io exception",e);
         }
-        return result;
     }
 
     public MorphiumCursor initIteration(String db, String collection, Map<String, Object> query, Map<String, Integer> sort, Map<String, Object> projection, int skip, int limit, int batchSize, ReadPreference readPreference, Map<String, Object> findMetaData) throws MorphiumDriverException {
@@ -376,26 +399,15 @@ public class InfluxDbDriver implements MorphiumDriver {
         }
 
         log.info("Query " + b.toString());
-        CloseableHttpClient cl = HttpClients.custom().setKeepAliveStrategy(keepAliveStrategy).
-                setConnectionManager(conMgr).build();
-
-        //need to write to all hosts in cluster
-
-        String h = getHostSeed()[(int) (Math.random() * getHostSeed().length)];
-        HttpGet p = null;
-        try {
-            p = new HttpGet("http://" + h + "/query?db=" + db + "&q=" + URLEncoder.encode(b.toString(), "UTF8"));
-        } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
-        }
 
         //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
         List<Map<String, Object>> res = new ArrayList<Map<String, Object>>();
         try {
-            CloseableHttpResponse resp = cl.execute(p);
+            CloseableHttpResponse resp = doRequest(db,"query",b.toString());
             BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
             JSONParser parser = new JSONParser();
             Map<String, Object> result = (Map<String, Object>) parser.parse(in);
+            resp.close();
             log.info("Got Result!");
             if (result.get("error")!=null)throw new MorphiumDriverException(result.get("error").toString());
             if (result.get("results")==null) return res;
