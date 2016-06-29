@@ -353,15 +353,31 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public MorphiumCursor initIteration(String db, String collection, Map<String, Object> query, Map<String, Integer> sort, Map<String, Object> projection, int skip, int limit, int batchSize, ReadPreference readPreference, Map<String, Object> findMetaData) throws MorphiumDriverException {
-        return null;
+        MorphiumCursor<InfluxCursor> crs = new MorphiumCursor<InfluxCursor>();
+
+        crs.setBatch(find(db, collection, query, sort, projection, skip, limit, batchSize, readPreference, findMetaData));
+        crs.setCursorId(System.currentTimeMillis());
+        InfluxCursor ic = new InfluxCursor();
+        ic.db = db;
+        ic.collection = collection;
+        ic.query = query;
+        ic.sort = sort;
+        ic.projection = projection;
+        ic.skip = skip + limit;
+        ic.limit = limit;
+        crs.setInternalCursorObject(ic);
+        return crs;
     }
 
     public MorphiumCursor nextIteration(MorphiumCursor crs) throws MorphiumDriverException {
-        return null;
+        InfluxCursor ic = (InfluxCursor) crs.getInternalCursorObject();
+        crs.setBatch(find(ic.db, ic.collection, ic.query, ic.sort, ic.projection, ic.skip, ic.limit, 0, null, null));
+        ic.skip = ic.skip + ic.limit;
+        return crs;
     }
 
     public void closeIteration(MorphiumCursor crs) throws MorphiumDriverException {
-
+        //nothing to do here!
     }
 
     public List<Map<String, Object>> find(String db, String collection, Map<String, Object> query, Map<String, Integer> sort, Map<String, Object> projection, int skip, int limit, int batchSize, ReadPreference rp, Map<String, Object> findMetaData) throws MorphiumDriverException {
@@ -402,7 +418,12 @@ public class InfluxDbDriver implements MorphiumDriver {
             b.append(" group by ");
             b.append(groupBy);
         }
-
+        if (skip > 0) {
+            b.append(" offset ").append(skip);
+        }
+        if (limit > 0) {
+            b.append(" limit ").append(limit);
+        }
         log.info("Query " + b.toString());
 
         //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
@@ -687,5 +708,15 @@ public class InfluxDbDriver implements MorphiumDriver {
 
     }
 
+
+    private class InfluxCursor {
+        public int skip = 0;
+        public int limit = 0;
+        public String db;
+        public String collection;
+        public Map<String, Object> query;
+        public Map<String, Integer> sort;
+        public Map<String, Object> projection;
+    }
 
 }
