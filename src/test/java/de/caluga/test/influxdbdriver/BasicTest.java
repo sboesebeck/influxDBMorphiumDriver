@@ -9,11 +9,11 @@ import de.caluga.morphium.query.Query;
 import org.junit.Test;
 
 import java.util.List;
-
 /**
- * Created by stephan on 22.06.16.
+ * simple Connection Test
  */
 
+@SuppressWarnings("ALL")
 public class BasicTest {
 
     @Test

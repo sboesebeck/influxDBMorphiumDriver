@@ -48,20 +48,8 @@ import java.util.concurrent.TimeUnit;
  * </ul>
  */
 public class InfluxDbDriver implements MorphiumDriver {
-    private int maxConPerHost = 1;
-    private int minConPerHost = 1;
-    private int socketTimeout = 0;
-    private int conTimeout = 5000;
-    private int heartbeatFrequency = 1000;
-    private Logger log = new Logger(InfluxDbDriver.class);
-    private PoolingHttpClientConnectionManager conMgr;
-
-    private String[] hosts;
-
-    private String login;
-    private String password;
-
-    private ConnectionKeepAliveStrategy keepAliveStrategy = new ConnectionKeepAliveStrategy() {
+    private final Logger log = new Logger(InfluxDbDriver.class);
+    private final ConnectionKeepAliveStrategy keepAliveStrategy = new ConnectionKeepAliveStrategy() {
         public long getKeepAliveDuration(HttpResponse response, HttpContext context) {
             HeaderElementIterator it = new BasicHeaderElementIterator
                     (response.headerIterator(HTTP.CONN_KEEP_ALIVE));
@@ -77,7 +65,13 @@ public class InfluxDbDriver implements MorphiumDriver {
             return 5 * 1000;
         }
     };
-    private int retriesOnNetworError=1;
+    private int maxConPerHost = 1;
+    private int socketTimeout = 0;
+    private int conTimeout = 5000;
+    private PoolingHttpClientConnectionManager conMgr;
+    private String[] hosts;
+    private String login;
+    private String password;
 
     public void setCredentials(String db, String login, char[] pwd) {
         this.login=login;
@@ -117,7 +111,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public int getMinConnectionsPerHost() {
-        return minConPerHost;
+        return 1;
     }
 
     public void setMinConnectionsPerHost(int mx) {
@@ -169,7 +163,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public int getHeartbeatFrequency() {
-        return heartbeatFrequency;
+        return 1000;
     }
 
     public void setHeartbeatFrequency(int heartbeatFrequency) {
@@ -279,7 +273,6 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void setRetriesOnNetworkError(int r) {
-        this.retriesOnNetworError=r;
     }
 
     public int getSleepBetweenErrorRetries() {
@@ -312,7 +305,7 @@ public class InfluxDbDriver implements MorphiumDriver {
             CloseableHttpResponse resp = doRequest(db, "query",cmd.get("qstr").toString());
             BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
             JSONParser parser = new JSONParser();
-            Map<String,Object> result = (Map<String, Object>) parser.parse(in);
+            @SuppressWarnings("unchecked") Map<String, Object> result = (Map<String, Object>) parser.parse(in);
             resp.close();
             return result;
         } catch (IOException e) {
@@ -342,9 +335,8 @@ public class InfluxDbDriver implements MorphiumDriver {
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }
-        Map<String, Object> result=null;
         try {
-            CloseableHttpResponse resp = null;
+            CloseableHttpResponse resp;
             resp = cl.execute(p);
             return resp;
         } catch (IOException e) {
@@ -398,7 +390,7 @@ public class InfluxDbDriver implements MorphiumDriver {
                     }
                     b.append(m.getValue()).append("(");
                     b.append(m.getKey()).append(")");
-                    b.append(" as " + m.getKey());
+                    b.append(" as ").append(m.getKey());
                 }
                 b.append(",");
             }
@@ -432,7 +424,7 @@ public class InfluxDbDriver implements MorphiumDriver {
             CloseableHttpResponse resp = doRequest(db,"query",b.toString());
             BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
             JSONParser parser = new JSONParser();
-            Map<String, Object> result = (Map<String, Object>) parser.parse(in);
+            @SuppressWarnings("unchecked") Map<String, Object> result = (Map<String, Object>) parser.parse(in);
             resp.close();
             log.info("Got Result!");
             if (result.get("error")!=null)throw new MorphiumDriverException(result.get("error").toString());
@@ -465,6 +457,7 @@ public class InfluxDbDriver implements MorphiumDriver {
                             resObj.put(cols.get(i).toString(), arr.get(i));
                         }
                     }
+                    //noinspection unchecked
                     resObj.putAll(tags);
                     res.add(resObj);
                 }
@@ -489,7 +482,7 @@ public class InfluxDbDriver implements MorphiumDriver {
             boolean time=false;
             if (e.getKey().equals("$and") || e.getKey().equals("$or")) {
                 //And concatenation
-                List<Map<String, Object>> subQueries = (List<Map<String, Object>>) e.getValue();
+                @SuppressWarnings("unchecked") List<Map<String, Object>> subQueries = (List<Map<String, Object>>) e.getValue();
                 for (Map<String, Object> q : subQueries) {
                     addQueryString(b, q);
                     if (e.getKey().equals("$and")) {
@@ -506,7 +499,7 @@ public class InfluxDbDriver implements MorphiumDriver {
                 b.append(e.getKey());
             }
             if (e.getValue() instanceof Map) {
-                Map<String, Object> qe = (Map<String, Object>) e.getValue();
+                @SuppressWarnings("unchecked") Map<String, Object> qe = (Map<String, Object>) e.getValue();
                 for (Map.Entry<String, Object> en : qe.entrySet()) {
                     if (en.getKey().equals("$eq")) {
                         b.append("=");
