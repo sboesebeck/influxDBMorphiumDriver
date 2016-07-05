@@ -9,6 +9,7 @@ import org.apache.http.HeaderElement;
 import org.apache.http.HeaderElementIterator;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.conn.ConnectionKeepAliveStrategy;
@@ -30,21 +31,19 @@ import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
  * basic influx db support for morphium
- *
+ * <p>
  * translation of the morphium fluent interface for queries to influxQL has some caveats:
- *
+ * <p>
  * <ul>
- *     <li>not possible to issue several select commands in one query</li>
- *     <li>if you want to use aggregation, add the aggregate function to the projection like <code>query.addProjection("reqtime","mean");</code></li>
- *     <li>complex queries rely on setting the query to the key <code>qstr</code> (for query string). Make sure this is valid!</li>
+ * <li>not possible to issue several select commands in one query</li>
+ * <li>if you want to use aggregation, add the aggregate function to the projection like <code>query.addProjection("reqtime","mean");</code></li>
+ * <li>complex queries rely on setting the query to the key <code>qstr</code> (for query string). Make sure this is valid!</li>
  * </ul>
  */
 public class InfluxDbDriver implements MorphiumDriver {
@@ -72,18 +71,23 @@ public class InfluxDbDriver implements MorphiumDriver {
     private String[] hosts;
     private String login;
     private String password;
+    private int sleepBetweenNetworkErrorRetries = 2000;
+    private int networkRetries = 1;
+    private ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
+
+    private Map<String, List<HttpEntityEnclosingRequestBase>> failedRequests = new HashMap<String, List<HttpEntityEnclosingRequestBase>>();
 
     public void setCredentials(String db, String login, char[] pwd) {
-        this.login=login;
-        this.password=new String(pwd);
+        this.login = login;
+        this.password = new String(pwd);
     }
 
     public boolean isReplicaset() {
-        return hosts!=null&&hosts.length>0;
+        return hosts != null && hosts.length > 0;
     }
 
     public String[] getCredentials(String db) {
-        return new String[]{login,password};
+        return new String[]{login, password};
     }
 
     public boolean isDefaultFsync() {
@@ -191,6 +195,9 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void setUseSSL(boolean useSSL) {
+        if (useSSL) {
+            throw new IllegalArgumentException("SSL not supported");
+        }
 
     }
 
@@ -231,13 +238,17 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public void useSsl(boolean ssl) {
-
+        if (ssl) {
+            throw new IllegalArgumentException("SSL not supported");
+        }
     }
 
     public void connect() throws MorphiumDriverException {
         conMgr = new PoolingHttpClientConnectionManager(getMaxConnectionLifetime(), TimeUnit.MILLISECONDS);
         conMgr.setDefaultMaxPerRoute(100);
         conMgr.setMaxTotal(100000);
+
+
     }
 
     public void setDefaultReadPreference(ReadPreference rp) {
@@ -249,7 +260,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public Maximums getMaximums() {
-        Maximums ret=new Maximums();
+        Maximums ret = new Maximums();
         ret.setMaxBsonSize(Integer.MAX_VALUE);
         ret.setMaxMessageSize(Integer.MAX_VALUE);
         ret.setMaxWriteBatchSize(100);
@@ -257,7 +268,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public boolean isConnected() {
-        return conMgr!=null;
+        return conMgr != null;
     }
 
     public int getDefaultWriteTimeout() {
@@ -269,18 +280,19 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public int getRetriesOnNetworkError() {
-        return 1;
+        return networkRetries;
     }
 
     public void setRetriesOnNetworkError(int r) {
+        networkRetries = r;
     }
 
     public int getSleepBetweenErrorRetries() {
-        return 0;
+        return sleepBetweenNetworkErrorRetries;
     }
 
     public void setSleepBetweenErrorRetries(int s) {
-
+        sleepBetweenNetworkErrorRetries = s;
     }
 
     public void close() throws MorphiumDriverException {
@@ -302,45 +314,53 @@ public class InfluxDbDriver implements MorphiumDriver {
 
     public Map<String, Object> runCommand(String db, Map<String, Object> cmd) throws MorphiumDriverException {
         try {
-            CloseableHttpResponse resp = doRequest(db, "query",cmd.get("qstr").toString());
+            CloseableHttpResponse resp = doRequest(db, "query", cmd.get("qstr").toString());
             BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
             JSONParser parser = new JSONParser();
             @SuppressWarnings("unchecked") Map<String, Object> result = (Map<String, Object>) parser.parse(in);
             resp.close();
             return result;
         } catch (IOException e) {
-            throw new MorphiumDriverException("IO Error",e);
+            throw new MorphiumDriverException("IO Error", e);
         } catch (ParseException e) {
-            throw new MorphiumDriverException("Parse error",e);
+            throw new MorphiumDriverException("Parse error", e);
         }
     }
 
-    private CloseableHttpResponse doRequest(String db,String op,String str) throws MorphiumDriverException {
-        CloseableHttpClient cl = HttpClients.custom().setKeepAliveStrategy(keepAliveStrategy).
-                setConnectionManager(conMgr).build();
+    private CloseableHttpResponse doRequest(String db, String op, String str) throws MorphiumDriverException {
+        int count = 0;
+        while (true) {
+            count++;
+            CloseableHttpClient cl = HttpClients.custom().setKeepAliveStrategy(keepAliveStrategy).
+                    setConnectionManager(conMgr).build();
 
-        String h = getHostSeed()[(int) (Math.random() * getHostSeed().length)];
-        HttpGet p = null;
-        StringBuilder auth=new StringBuilder();
-        if (login!=null){
-            try {
-                auth.append("&u=").append(URLEncoder.encode(login,"UTF8"));
-                auth.append("&p=").append(URLEncoder.encode(password,"UTF8"));
-            } catch (UnsupportedEncodingException e) {
-                log.error("Authentication failed!",e);
+            String h = getHostSeed()[(int) (Math.random() * getHostSeed().length)];
+            HttpGet p = null;
+            StringBuilder auth = new StringBuilder();
+            if (login != null) {
+                try {
+                    auth.append("&u=").append(URLEncoder.encode(login, "UTF8"));
+                    auth.append("&p=").append(URLEncoder.encode(password, "UTF8"));
+                } catch (UnsupportedEncodingException e) {
+                    log.error("Authentication failed!", e);
+                }
             }
-        }
-        try {
-            p = new HttpGet("http://" + h + "/"+op+"?db=" + db +auth.toString()+ "&q=" + URLEncoder.encode(str, "UTF8"));
-        } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
-        }
-        try {
-            CloseableHttpResponse resp;
-            resp = cl.execute(p);
-            return resp;
-        } catch (IOException e) {
-            throw new MorphiumDriverException("io exception",e);
+            try {
+                p = new HttpGet("http://" + h + "/" + op + "?db=" + db + auth.toString() + "&q=" + URLEncoder.encode(str, "UTF8"));
+                CloseableHttpResponse resp;
+                resp = cl.execute(p);
+                return resp;
+            } catch (Exception e) {
+                if (count > getRetriesOnNetworkError()) {
+                    throw new MorphiumDriverException("io exception", e);
+                }
+                //otherwise retry
+                try {
+                    Thread.sleep(getSleepBetweenErrorRetries());
+                } catch (InterruptedException ignored) {
+                    log.debug("Sleep interrupted", ignored);
+                }
+            }
         }
     }
 
@@ -421,14 +441,18 @@ public class InfluxDbDriver implements MorphiumDriver {
         //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
         List<Map<String, Object>> res = new ArrayList<Map<String, Object>>();
         try {
-            CloseableHttpResponse resp = doRequest(db,"query",b.toString());
+            CloseableHttpResponse resp = doRequest(db, "query", b.toString());
             BufferedReader in = new BufferedReader(new InputStreamReader(resp.getEntity().getContent()));
             JSONParser parser = new JSONParser();
             @SuppressWarnings("unchecked") Map<String, Object> result = (Map<String, Object>) parser.parse(in);
             resp.close();
             log.info("Got Result!");
-            if (result.get("error")!=null)throw new MorphiumDriverException(result.get("error").toString());
-            if (result.get("results")==null) return res;
+            if (result.get("error") != null) {
+                throw new MorphiumDriverException(result.get("error").toString());
+            }
+            if (result.get("results") == null) {
+                return res;
+            }
             JSONArray series = (JSONArray) ((JSONObject) ((JSONArray) result.get("results")).get(0)).get("series");
 
             for (Object o : series) {
@@ -479,7 +503,7 @@ public class InfluxDbDriver implements MorphiumDriver {
                 //this is the timestamp...
                 continue;
             }
-            boolean time=false;
+            boolean time = false;
             if (e.getKey().equals("$and") || e.getKey().equals("$or")) {
                 //And concatenation
                 @SuppressWarnings("unchecked") List<Map<String, Object>> subQueries = (List<Map<String, Object>>) e.getValue();
@@ -493,8 +517,9 @@ public class InfluxDbDriver implements MorphiumDriver {
                 }
                 trimLastBooleanOp(b);
                 continue;
-            } else if (e.getKey().equals("time()")){
-                b.append("time"); time=true;
+            } else if (e.getKey().equals("time()")) {
+                b.append("time");
+                time = true;
             } else {
                 b.append(e.getKey());
             }
@@ -606,16 +631,33 @@ public class InfluxDbDriver implements MorphiumDriver {
 
         //need to write to all hosts in cluster
         for (String h : getHostSeed()) {
-            HttpPost p = new HttpPost("http://" + h + "/write?db=" + db);
+            int retryCount = 0;
+            while (true) {
+                retryCount++;
+                HttpPost p = new HttpPost("http://" + h + "/write?db=" + db);
 
-            StringEntity e = new StringEntity(b.toString(), "UTF8");
-            //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
-            p.setEntity(e);
-            try {
-                cl.execute(p).close();
+                StringEntity e = new StringEntity(b.toString(), "UTF8");
+                //            log.info("Sending to db " + db + " on host " + h + ": " + b.toString());
+                p.setEntity(e);
+                try {
+                    cl.execute(p).close();
 
-            } catch (IOException e1) {
-                throw new MorphiumDriverException("ioexception", e1);
+                } catch (IOException e1) {
+                    if (retryCount > getRetriesOnNetworkError()) {
+                        List<String> hlst = Arrays.asList(hosts);
+                        hlst.remove(h);
+                        hosts = hlst.toArray(hosts);
+                        failedRequests.putIfAbsent(h, new ArrayList<HttpEntityEnclosingRequestBase>());
+                        failedRequests.get(h).add(p);
+                        throw new MorphiumDriverException("could not write to host " + h + " - possible data loss!!!!", e1);
+                    }
+                }
+                try {
+                    Thread.sleep(getSleepBetweenErrorRetries());
+                } catch (InterruptedException e2) {
+                    log.debug("sleep interrupted", e2);
+                }
+                break;
             }
         }
     }
