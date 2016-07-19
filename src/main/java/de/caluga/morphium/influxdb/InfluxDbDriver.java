@@ -588,8 +588,7 @@ public class InfluxDbDriver implements MorphiumDriver {
         //all others as tags
 
         for (Map<String, Object> measurement : list) {
-            long tm = System.nanoTime();
-
+            long tm = System.currentTimeMillis()*1000;
 
             if (measurement.get("_id") != null) {
                 //                log.warn("Cannot up´date values in influxdb! Will create a new entry!");
