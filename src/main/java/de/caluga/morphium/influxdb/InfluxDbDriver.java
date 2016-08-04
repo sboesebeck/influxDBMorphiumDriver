@@ -743,6 +743,11 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
 
+    @Override
+    public List<Map<String, Object>> mapReduce(String db, String collection, String mapping, String reducing) throws MorphiumDriverException {
+        throw new FunctionNotSupportedException("No MapReduce with influxdb!");
+    }
+
     private class InfluxCursor {
         public int skip = 0;
         public int limit = 0;
