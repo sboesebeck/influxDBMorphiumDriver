@@ -80,7 +80,7 @@ public class BasicTest {
         boolean gotError=false;
 
         try {
-            q=m.createQueryFor(EntTest.class).f("host").eq(hosts[1]).f("lfd").gt(12).f("time()").gt("now(-00d");
+            q = m.createQueryFor(EntTest.class).f("host").eq(hosts[1]).f("lfd").gt(12).f("time()").gt("now()-100d");
             lst=q.asList(); //error
         } catch (Exception e) {
             System.out.println("Got expected exception!");
