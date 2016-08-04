@@ -383,7 +383,32 @@ public class InfluxDbDriver implements MorphiumDriver {
 
     @Override
     public void tailableIteration(String db, String collection, Map<String, Object> query, Map<String, Integer> sort, Map<String, Object> projection, int skip, int limit, int batchSize, ReadPreference readPreference, int timeout, DriverTailableIterationCallback cb) throws MorphiumDriverException {
+        new Thread() {
+            public void run() {
+                int sk = skip;
+                long start = System.currentTimeMillis();
+                while (true) {
+                    try {
+                        List<Map<String, Object>> res = find(db, collection, query, sort, projection, sk, limit, batchSize, readPreference, null);
+                        for (Map<String, Object> o : res) {
+                            if (!cb.incomingData(o, System.currentTimeMillis() - start)) {
+                                return;
+                            }
+                        }
+                        sk += res.size();
 
+                    } catch (MorphiumDriverException e) {
+                        log.error(e);
+                        return;
+                    }
+                    try {
+                        sleep(100);
+                    } catch (InterruptedException e) {
+                        log.debug("Ignoring intterupt");
+                    }
+                }
+            }
+        }.start();
 
     }
 
