@@ -381,6 +381,12 @@ public class InfluxDbDriver implements MorphiumDriver {
         return crs;
     }
 
+    @Override
+    public void tailableIteration(String db, String collection, Map<String, Object> query, Map<String, Integer> sort, Map<String, Object> projection, int skip, int limit, int batchSize, ReadPreference readPreference, int timeout, DriverTailableIterationCallback cb) throws MorphiumDriverException {
+
+
+    }
+
     public MorphiumCursor nextIteration(MorphiumCursor crs) throws MorphiumDriverException {
         InfluxCursor ic = (InfluxCursor) crs.getInternalCursorObject();
         crs.setBatch(find(ic.db, ic.collection, ic.query, ic.sort, ic.projection, ic.skip, ic.limit, 0, null, null));
@@ -746,6 +752,16 @@ public class InfluxDbDriver implements MorphiumDriver {
     @Override
     public List<Map<String, Object>> mapReduce(String db, String collection, String mapping, String reducing) throws MorphiumDriverException {
         throw new FunctionNotSupportedException("No MapReduce with influxdb!");
+    }
+
+    @Override
+    public List<Map<String, Object>> mapReduce(String db, String collection, String mapping, String reducing, Map<String, Object> query) throws MorphiumDriverException {
+        return null;
+    }
+
+    @Override
+    public List<Map<String, Object>> mapReduce(String db, String collection, String mapping, String reducing, Map<String, Object> query, Map<String, Object> sorting) throws MorphiumDriverException {
+        return null;
     }
 
     private class InfluxCursor {
