@@ -3,7 +3,7 @@ package de.caluga.morphium.influxdb;
 import de.caluga.morphium.Logger;
 import de.caluga.morphium.Morphium;
 import de.caluga.morphium.driver.*;
-import de.caluga.morphium.driver.bulk.BulkRequestContext;
+import de.caluga.morphium.driver.bulk.*;
 import de.caluga.morphium.driver.mongodb.Maximums;
 import org.apache.http.HeaderElement;
 import org.apache.http.HeaderElementIterator;
@@ -76,6 +76,11 @@ public class InfluxDbDriver implements MorphiumDriver {
     private ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
 
     private Map<String, List<HttpEntityEnclosingRequestBase>> failedRequests = new HashMap<String, List<HttpEntityEnclosingRequestBase>>();
+
+    @Override
+    public List<String> listDatabases() throws MorphiumDriverException {
+        return null;
+    }
 
     public void setCredentials(String db, String login, char[] pwd) {
         this.login = login;
@@ -766,7 +771,7 @@ public class InfluxDbDriver implements MorphiumDriver {
     }
 
     public BulkRequestContext createBulkContext(Morphium m, String db, String collection, boolean ordered, WriteConcern wc) {
-        return null;
+        return new BRContext(m, db, collection);
     }
 
     public void createIndex(String db, String collection, Map<String, Object> index, Map<String, Object> options) throws MorphiumDriverException {
@@ -781,12 +786,91 @@ public class InfluxDbDriver implements MorphiumDriver {
 
     @Override
     public List<Map<String, Object>> mapReduce(String db, String collection, String mapping, String reducing, Map<String, Object> query) throws MorphiumDriverException {
-        return null;
+        throw new FunctionNotSupportedException("No MapReduce with influxdb!");
     }
 
     @Override
     public List<Map<String, Object>> mapReduce(String db, String collection, String mapping, String reducing, Map<String, Object> query, Map<String, Object> sorting) throws MorphiumDriverException {
+        throw new FunctionNotSupportedException("No MapReduce with influxdb!");
+    }
+
+    @Override
+    public List<String> listCollections(String db, String pattern) throws MorphiumDriverException {
         return null;
+    }
+
+    private class BRContext extends BulkRequestContext {
+        private final String collection;
+        private final String database;
+        private Vector<BulkRequest> oplog = new Vector<>();
+
+        public BRContext(Morphium m, String db, String collection) {
+            super(m);
+            this.database = db;
+            this.collection = collection;
+        }
+
+        @Override
+        public Map<String, Object> execute() throws MorphiumDriverException {
+            int numInsert = 0;
+            for (BulkRequest br : oplog) {
+                if (br instanceof UpdateBulkRequest) {
+                    log.debug("Ignoring update bulk requests - updates not possible with influx for now");
+
+                } else if (br instanceof StoreBulkRequest) {
+                    StoreBulkRequest store = (StoreBulkRequest) br;
+                    numInsert = numInsert + store.getToInsert().size();
+                    InfluxDbDriver.this.store(database, collection, store.getToInsert(), null);
+                } else if (br instanceof InsertBulkRequest) {
+                    InsertBulkRequest insert = (InsertBulkRequest) br;
+                    numInsert += insert.getToInsert().size();
+                    InfluxDbDriver.this.store(database, collection, insert.getToInsert(), null);
+                } else if (br instanceof DeleteBulkRequest) {
+                    log.debug("Deletion not possible");
+                } else {
+                    log.error("Cannot process bulk request of type " + br.getClass().getName());
+                }
+            }
+            Map<String, Object> res = new HashMap<>();
+            res.put("num_del", 0);
+            res.put("num_matched", 0);
+            res.put("num_insert", numInsert);
+            res.put("num_modified", 0);
+            res.put("num_upserts", 0);
+            return res;
+        }
+
+        @Override
+        public UpdateBulkRequest addUpdateBulkRequest() {
+            UpdateBulkRequest b = new UpdateBulkRequest();
+
+            oplog.add(b);
+            return b;
+        }
+
+        @Override
+        public StoreBulkRequest addStoreBulkRequest(List<Map<String, Object>> toStore) {
+            StoreBulkRequest b = new StoreBulkRequest(toStore);
+
+            oplog.add(b);
+            return b;
+        }
+
+        @Override
+        public InsertBulkRequest addInsertBulkReqpest(List<Map<String, Object>> toInsert) {
+            InsertBulkRequest b = new InsertBulkRequest(toInsert);
+
+            oplog.add(b);
+            return b;
+        }
+
+        @Override
+        public DeleteBulkRequest addDeleteBulkRequest() {
+            DeleteBulkRequest b = new DeleteBulkRequest();
+
+            oplog.add(b);
+            return b;
+        }
     }
 
     private class InfluxCursor {
